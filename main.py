@@ -9,21 +9,14 @@ import selenium.common.exceptions
 
 from tqdm import tqdm
 
-USERNAME = ''
-PASSWORD = ''
-CHAT_ID = 1
-
 
 class AttachmentType(str, enum.Enum):
     PHOTOS = 'photos'
-    VIDEOS = 'videos'
-
-
-ATTACHMENT_TYPE = AttachmentType.PHOTOS
+    VIDEO = 'video'
 
 
 @backoff.on_exception(backoff.expo, selenium.common.exceptions.NoSuchElementException, max_tries=5)
-def download_photo(url, photos_path):
+def download_photo(url, download_path):
     driver.get(url)
 
     menu = driver.find_element(By.CSS_SELECTOR, value='#photo_context > button')
@@ -34,16 +27,16 @@ def download_photo(url, photos_path):
     matches = next(iter(re.findall(r'([\d\w\-]*)\.jpg\?size=(\d*x\d*)', download_url)), None)
     if len(matches):
         code, size = matches
-        urllib.request.urlretrieve(download_url, os.path.join(photos_path, f'{code}.jpg'))
+        urllib.request.urlretrieve(download_url, os.path.join(download_path, f'{code}.jpg'))
 
 
-def download_photos():
+def download_photos(download_path: str):
     item_urls = [item.get_attribute('href')
                  for item in driver.find_elements(By.CSS_SELECTOR, '.photos_page > a.al_photo')]
     print('Total items: ', len(item_urls))
     for url in tqdm(item_urls):
         # print('Downloading url=%s...', url)
-        download_photo(url, photos_path=download_path)
+        download_photo(url, download_path=download_path)
 
 
 def get_video_data(source):
@@ -51,7 +44,7 @@ def get_video_data(source):
     return code, size, source
 
 
-def download_video(url, videos_path):
+def download_video(url, download_path):
     driver.get(url)
 
     sources = [item.get_attribute('src')
@@ -62,10 +55,23 @@ def download_video(url, videos_path):
     print(matches)
     if len(matches):
         code, size, url = matches[0]
-        urllib.request.urlretrieve(url, os.path.join(videos_path, f'{code}.{size}.mp4'))
+        urllib.request.urlretrieve(url, os.path.join(download_path, f'{code}.{size}.mp4'))
 
 
-def scroll_to_end():
+def download_videos(download_path: str):
+    item_urls = [item.get_attribute('href') for item in driver.find_elements(By.CSS_SELECTOR, '.video_item > a')]
+    print('Total items: ', len(item_urls))
+    for url in item_urls:
+        print('Downloading url=%s...', url)
+        download_video(url, download_path=download_path)
+
+
+def get_and_scroll_to_end_by(attachment_type: AttachmentType):
+    url = urljoin(driver.current_url,
+                  f'/mail?act=show_medias&peer={config["chat_id"]}&section={attachment_type.value}')
+    print(url)
+    driver.get(url)
+
     print('Scroll to end...')
     last_height = driver.execute_script("return document.body.scrollHeight")
     while True:
@@ -81,17 +87,11 @@ def scroll_to_end():
         last_height = new_height
 
 
-def download_videos():
-    item_urls = [item.get_attribute('href') for item in driver.find_elements(By.CSS_SELECTOR, '.video_item > a')]
-    print('Total items: ', len(item_urls))
-    for url in item_urls:
-        print('Downloading url=%s...', url)
-        download_video(url, videos_path=download_path)
-
-
 if __name__ == '__main__':
-    download_path = os.path.join('data/', str(CHAT_ID), ATTACHMENT_TYPE.value)
-    os.makedirs(download_path, exist_ok=True)
+    import json
+
+    with open('config.json', 'r') as stream:
+        config = json.load(stream)
 
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -110,31 +110,37 @@ if __name__ == '__main__':
 
     driver.get('https://vk.com')
 
-    email = driver.find_element(by=By.NAME, value='email')
+    sign_in = driver.find_element(by=By.LINK_TEXT, value='Sign in')
+    sign_in.click()
+
+    email = driver.find_element(by=By.CSS_SELECTOR, value='.vkc__EnterLogin__input input')
     email.click()
     email.clear()
-    email.send_keys(USERNAME)
+    email.send_keys(config['username'])
+    email.send_keys(Keys.RETURN)
 
-    password = driver.find_element(by=By.NAME, value='pass')
+    password = driver.find_element(by=By.CSS_SELECTOR, value='.vkc__Password__Wrapper input')
     password.click()
     password.clear()
-    password.send_keys(PASSWORD)
-
+    password.send_keys(config['password'])
     password.send_keys(Keys.RETURN)
+
+    time.sleep(1)
 
     # login = browser.find_element(by=By.CSS_SELECTOR, value='input[type="submit"][value="Sign in"]')
     # login.click()
 
     from urllib.parse import urljoin
 
-    driver.get(urljoin(driver.current_url, f'/mail?act=show_medias&peer={CHAT_ID}&section={ATTACHMENT_TYPE}'))
+    get_and_scroll_to_end_by(AttachmentType.PHOTOS)
+    photos_path = os.path.join('data/', str(config['chat_id']), AttachmentType.PHOTOS.value)
+    os.makedirs(photos_path, exist_ok=True)
+    download_photos(download_path=photos_path)
 
-    scroll_to_end()
-
-    if ATTACHMENT_TYPE == AttachmentType.PHOTOS:
-        download_photos()
-    elif ATTACHMENT_TYPE == ATTACHMENT_TYPE.VIDEOS:
-        download_videos()
+    get_and_scroll_to_end_by(AttachmentType.VIDEO)
+    videos_path = os.path.join('data/', str(config['chat_id']), AttachmentType.VIDEO.value + 's')
+    os.makedirs(videos_path, exist_ok=True)
+    download_videos(download_path=videos_path)
 
     input('Press Enter any key to exit...')
 
