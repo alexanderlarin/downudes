@@ -1,0 +1,9 @@
+# IDE
+.vs/
+.idea/
+
+# data
+data/
+
+# binaries
+*.exe
